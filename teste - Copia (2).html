@@ -1,0 +1,1309 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Imbera - SLA & NTP 2.0 (final)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap');
+        body { font-family: 'Inter', sans-serif; scroll-behavior: smooth; }
+        .chart-container { position: relative; height: 300px; width: 100%; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .fade-in { animation: fadeIn 0.4s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .nav-btn.active { background-color: #1e293b; color: white; }
+        .nav-btn.inactive { background-color: white; color: #64748b; border: 1px solid #e2e8f0; }
+        
+        /* Styles for the Database Table Filters */
+        .filter-icon { cursor: pointer; color: #94a3b8; font-size: 0.7rem; margin-left: 6px; }
+        .filter-icon:hover { color: #2563eb; }
+        .th-content { display: flex; align-items: center; justify-content: space-between; }
+        .db-select { 
+            position: absolute; top: 100%; left: 0; z-index: 50; 
+            background: white; border: 1px solid #e2e8f0; 
+            border-radius: 6px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); 
+            padding: 4px; max-height: 200px; overflow-y: auto; display: none; width: 220px;
+        }
+        .db-select.show { display: block; }
+        .db-select div { padding: 6px 8px; font-size: 12px; cursor: pointer; }
+        .db-select div:hover { background-color: #f1f5f9; }
+        .db-select .empty { color: #9ca3af; font-style: italic; cursor: default; }
+    </style>
+</head>
+<body class="bg-[#f8fafc] text-slate-900 min-h-screen flex flex-col">
+
+<div id="infoModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[300] hidden flex items-center justify-center fade-in">
+    <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden m-4">
+        <div class="bg-slate-800 p-4 flex justify-between items-center">
+            <h3 class="text-white font-black text-sm flex items-center gap-2">
+                <i data-lucide="info" class="w-4 h-4"></i> Informações Complementares
+            </h3>
+            <button onclick="closeModal()" class="text-slate-400 hover:text-white transition-colors">
+                <i data-lucide="x" class="w-5 h-5"></i>
+            </button>
+        </div>
+        <div class="p-6 overflow-y-auto max-h-[70vh]" id="modalContent"></div>
+        <div class="bg-slate-50 p-3 text-center border-t border-slate-100">
+            <button onclick="closeModal()" class="text-xs font-bold text-slate-500 hover:text-slate-800">Fechar</button>
+        </div>
+    </div>
+</div>
+
+<div id="loginOverlay" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[200] flex items-center justify-center">
+  <div class="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+    <h2 class="text-lg font-black text-slate-800 mb-2">Acesso ao Dashboard</h2>
+    <p class="text-xs text-slate-500 mb-4">Senha padrão: 123 (Admin)</p>
+    <input id="passwordInput" type="password" placeholder="Senha (Admin)" class="w-full border rounded-lg px-3 py-2 text-sm mb-4" />
+    <div class="flex gap-2">
+      <button onclick="login(false)" class="flex-1 bg-slate-200 hover:bg-slate-300 rounded-lg py-2 text-sm font-bold">Visualizar</button>
+      <button onclick="login(true)" class="flex-1 bg-slate-800 hover:bg-black text-white rounded-lg py-2 text-sm font-bold">Admin</button>
+    </div>
+  </div>
+</div>
+
+<div class="max-w-[95%] mx-auto px-4 py-8 w-full" id="app">
+    <input type="file" id="csvInputAbertura" accept=".csv" class="hidden" onchange="handleFileSelect(event, 'sla_abertura')">
+    <input type="file" id="csvInputFechamento" accept=".csv" class="hidden" onchange="handleFileSelect(event, 'sla_fechamento')">
+    <input type="file" id="ntpCsvInput" accept=".csv" class="hidden" onchange="handleFileSelect(event, 'ntp')">
+
+    <div class="flex flex-col md:flex-row justify-between items-center mb-6 gap-6">
+        <div>
+            <h1 class="text-xl font-black text-slate-800 tracking-tight flex items-center gap-3">
+                <div class="bg-slate-800 p-2 rounded-lg text-white"><i data-lucide="bar-chart-3" class="w-5 h-5"></i></div>
+                Imbera Dashboard
+            </h1>
+        </div>
+        
+        <div class="flex gap-2 bg-slate-100 p-1 rounded-xl">
+            <button onclick="switchTab('sla')" id="btn-sla" class="nav-btn active px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2">
+                <i data-lucide="layout-dashboard" class="w-3.5 h-3.5"></i> SLA
+            </button>
+            <button onclick="switchTab('ntp')" id="btn-ntp" class="nav-btn inactive px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2">
+                <i data-lucide="file-warning" class="w-3.5 h-3.5"></i> NTPs
+            </button>
+            <!-- Botão Base de Dados removido do topo (ficará escondido) -->
+            <button onclick="switchTab('db')" id="btn-db" class="nav-btn inactive px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 hidden">
+                <i data-lucide="database" class="w-3.5 h-3.5"></i> Base de Dados
+            </button>
+        </div>
+
+        <div class="flex items-center gap-3">
+            <button id="btnZerar" onclick="clearDatabase()" class="hidden bg-red-50 text-red-600 border border-red-100 px-3 py-2 rounded-lg text-[10px] font-bold hover:bg-red-600 hover:text-white transition-all flex items-center gap-2">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> LIMPAR TUDO
+            </button>
+
+            <div class="bg-white px-4 py-2 rounded-xl shadow-sm border border-slate-200 flex items-center gap-2">
+                <span class="text-[10px] font-bold uppercase text-slate-400">Ano:</span>
+                <select id="globalYearFilter" onchange="changeYear(this.value)" class="bg-transparent border-none focus:ring-0 text-sm font-bold outline-none cursor-pointer text-slate-800">
+                    <option value="2025">2025</option>
+                    <option value="2026" selected>2026</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div id="view-sla" class="fade-in">
+        <!-- conteúdo SLA inalterado -->
+        <div class="flex flex-wrap items-center justify-end gap-3 mb-8">
+            <div class="bg-white px-3 py-1.5 rounded-lg shadow-sm border border-slate-200 flex items-center gap-2">
+                <i data-lucide="building-2" class="w-3.5 h-3.5 text-blue-500"></i>
+                <select id="unidadeFilter" onchange="changeUnidade(this.value)" class="bg-transparent border-none focus:ring-0 text-[10px] font-bold outline-none"></select>
+            </div>
+
+            <div class="bg-white px-3 py-1.5 rounded-lg shadow-sm border border-slate-200 flex items-center gap-2">
+                <i data-lucide="map-pin" class="w-3.5 h-3.5 text-slate-400"></i>
+                <select id="estadoFilter" onchange="changeEstado(this.value)" class="bg-transparent border-none focus:ring-0 text-[10px] font-bold outline-none min-w-[80px] cursor-pointer">
+                    <option value="Todos">Todos Estados</option>
+                </select>
+            </div>
+
+            <div class="h-6 w-px bg-slate-300 mx-2"></div>
+
+            <button onclick="document.getElementById('csvInputAbertura').click()" class="bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-lg text-blue-700 hover:bg-blue-100 flex items-center gap-2 text-[10px] font-bold transition-all">
+                <i data-lucide="arrow-down-circle" class="w-3.5 h-3.5"></i> Importar Aberturas
+            </button>
+            
+            <button onclick="document.getElementById('csvInputFechamento').click()" class="bg-emerald-50 border border-emerald-100 px-3 py-1.5 rounded-lg text-emerald-700 hover:bg-emerald-100 flex items-center gap-2 text-[10px] font-bold transition-all">
+                <i data-lucide="check-circle" class="w-3.5 h-3.5"></i> Importar Fechamentos
+            </button>
+        </div>
+
+        <!-- restantes do SLA sem alterações (omitido no código por brevidade) -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex items-center gap-4">
+                <div class="bg-blue-50 p-3 rounded-xl text-blue-600"><i data-lucide="inbox" class="w-5 h-5"></i></div>
+                <div><p class="text-[9px] text-slate-400 font-black uppercase tracking-widest">Total Aberturas</p><p id="statAberturas" class="text-xl font-black text-slate-800">0</p></div>
+            </div>
+            <div class="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex items-center gap-4">
+                <div class="bg-emerald-50 p-3 rounded-xl text-emerald-600"><i data-lucide="check-circle-2" class="w-5 h-5"></i></div>
+                <div><p class="text-[9px] text-slate-400 font-black uppercase tracking-widest">Total Fechamentos</p><p id="statFechamentos" class="text-xl font-black text-slate-800">0</p></div>
+            </div>
+            <div class="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 flex items-center gap-4">
+                <div id="slaColorBox" class="p-3 rounded-xl transition-colors duration-500"><i data-lucide="trending-up" class="w-5 h-5"></i></div>
+                <div><p class="text-[9px] text-slate-400 font-black uppercase tracking-widest">SLA Geral</p><p id="statSLA" class="text-xl font-black text-slate-800">0%</p></div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+                <div class="flex justify-between items-start mb-4">
+                    <h3 class="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                        <span class="w-1 h-3 bg-blue-600 rounded-full"></span> 
+                        Evolução do SLA %
+                    </h3>
+                    <div class="flex items-center gap-2">
+                        <span class="flex items-center gap-1 text-[9px] font-bold text-slate-400">
+                            <span class="w-2 h-0.5 bg-blue-600"></span> REALIZADO
+                        </span>
+                        <span class="flex items-center gap-1 text-[9px] font-bold text-slate-400">
+                            <span class="w-2 h-0.5 border-t border-dashed border-rose-400"></span> META (95%)
+                        </span>
+                    </div>
+                </div>
+                <div class="chart-container" style="height: 280px;"><canvas id="slaChart"></canvas></div>
+            </div>
+            
+            <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+                <h3 class="text-xs font-black text-slate-800 mb-4 uppercase tracking-wider flex items-center gap-2"><span class="w-1 h-3 bg-slate-300 rounded-full"></span> Comparativo Abert x Fech</h3>
+                <div class="chart-container"><canvas id="volumeChart"></canvas></div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+            <div class="p-5 bg-slate-50/50 border-b border-slate-100 flex justify-between items-center flex-wrap gap-4">
+                <h3 class="text-xs font-black text-slate-800 uppercase tracking-widest">Detalhamento Unidades</h3>
+                <div class="relative">
+                    <i data-lucide="search" class="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                    <input type="text" id="slaTableSearch" onkeyup="filterSlaTable()" placeholder="Filtrar Unidade..." class="pl-9 pr-4 py-1.5 rounded-lg border border-slate-200 text-[11px] font-bold focus:ring-2 focus:ring-blue-500 outline-none w-64">
+                </div>
+            </div>
+            <div class="overflow-x-auto custom-scrollbar max-h-[400px]">
+                <table class="w-full text-left text-[11px] border-separate border-spacing-0">
+                    <thead>
+                        <tr class="text-slate-400 bg-slate-50/30 sticky top-0 z-10 backdrop-blur-sm">
+                            <th class="px-6 py-4 font-black uppercase tracking-tighter">
+                                <div class="th-content">Unidade <span onclick="toggleSlaFilter(event,'unidade')" class="filter-icon">▼</span></div>
+                                <div id="sla-filter-unidade" class="db-select custom-scrollbar"></div>
+                            </th>
+                            <th class="px-6 py-4 font-black uppercase tracking-tighter">
+                                <div class="th-content">Mês <span onclick="toggleSlaFilter(event,'mes')" class="filter-icon">▼</span></div>
+                                <div id="sla-filter-mes" class="db-select custom-scrollbar"></div>
+                            </th>
+                            <th class="px-6 py-4 font-black uppercase tracking-tighter text-right">
+                                <div class="th-content">Aberturas <span onclick="toggleSlaFilter(event,'aberturas')" class="filter-icon">▼</span></div>
+                                <div id="sla-filter-aberturas" class="db-select custom-scrollbar"></div>
+                            </th>
+                            <th class="px-6 py-4 font-black uppercase tracking-tighter text-right">
+                                <div class="th-content">Fechamentos <span onclick="toggleSlaFilter(event,'fechamentos')" class="filter-icon">▼</span></div>
+                                <div id="sla-filter-fechamentos" class="db-select custom-scrollbar"></div>
+                            </th>
+                            <th class="px-6 py-4 font-black uppercase tracking-tighter text-right">SLA Calc.</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBody" class="divide-y divide-slate-50"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- --- ABA NTP (modificações aplicadas somente aqui) --- -->
+    <div id="view-ntp" class="hidden fade-in">
+        <div class="flex justify-between items-center mb-6">
+            <div>
+                <h2 class="text-lg font-black text-slate-700">Painel de NTPs (Erros)</h2>
+                <p class="text-xs text-slate-400">Controle de Postos e Técnicos</p>
+            </div>
+            <button onclick="document.getElementById('ntpCsvInput').click()" class="bg-rose-50 border border-rose-100 px-4 py-2 rounded-xl text-rose-600 hover:bg-rose-100 flex items-center gap-2 text-xs font-bold transition-all">
+                <i data-lucide="file-warning" class="w-4 h-4"></i> Importar CSV NTP
+            </button>
+        </div>
+
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 mb-6 flex flex-wrap gap-4 items-end">
+            <div class="flex flex-col gap-1">
+                <label class="text-[10px] font-bold uppercase text-slate-400">Unidade de Negócio</label>
+                <select id="ntpUnitFilter" onchange="updateNtpFilters('unit')" class="bg-slate-50 border border-slate-200 text-xs rounded-lg px-3 py-2 font-bold outline-none focus:border-blue-500 w-48">
+                    <option value="Todos">Todos</option>
+                </select>
+            </div>
+             <div class="flex flex-col gap-1">
+                <label class="text-[10px] font-bold uppercase text-slate-400">Posto</label>
+                <select id="ntpPostoFilter" onchange="updateNtpFilters('posto')" class="bg-slate-50 border border-slate-200 text-xs rounded-lg px-3 py-2 font-bold outline-none focus:border-blue-500 w-48">
+                    <option value="Todos">Todos</option>
+                </select>
+            </div>
+            <!-- Filtro Técnico removido conforme solicitado -->
+            <div class="flex flex-col gap-1 ml-auto">
+                <label class="text-[10px] font-bold uppercase text-slate-400">Busca Rápida</label>
+                <input type="text" id="ntpSearch" onkeyup="filterNtpTable()" placeholder="Data / Unidade / Status / ID..." class="bg-white border border-slate-200 text-xs rounded-lg px-3 py-2 font-bold outline-none focus:border-blue-500 w-56">
+            </div>
+
+            <div class="flex items-center gap-2">
+                <button onclick="clearAllNtpFilters()" class="text-xs bg-slate-50 border border-slate-100 px-3 py-2 rounded-lg font-bold">Limpar filtros</button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            <div class="lg:col-span-2 bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+                <h3 class="text-xs font-black text-slate-800 mb-4 uppercase tracking-wider flex items-center gap-2">
+                    <span class="w-1 h-3 bg-rose-500 rounded-full"></span> Evolução Mensal de NTPs
+                </h3>
+                <div id="ntpPercentBadge" class="text-xs text-slate-400 mb-2 text-right"></div>
+                <div class="chart-container"><canvas id="ntpChart"></canvas></div>
+            </div>
+            <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+                <h3 class="text-xs font-black text-slate-800 mb-4 uppercase tracking-wider flex items-center gap-2">
+                    <span class="w-1 h-3 bg-slate-400 rounded-full"></span> Top 10 Volumes (Posto)
+                </h3>
+                <div class="chart-container" style="height:220px"><canvas id="ntpBarChart"></canvas></div>
+                <!-- Comparativo Anual / Percentual de NTP -->
+                <div class="mt-4">
+                    <h4 class="text-[10px] font-black uppercase text-slate-400 mb-2">Comparativo Mensal</h4>
+                    <div style="height:140px" class="chart-container"><canvas id="ntpYearChart"></canvas></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+            <div class="p-5 bg-slate-50/50 border-b border-slate-100">
+                <h3 class="text-xs font-black text-slate-800 uppercase tracking-widest">Registros NTP Identificados</h3>
+                <p class="text-[10px] text-slate-400 mt-1">* Clique na linha para detalhes</p>
+            </div>
+            <div class="overflow-x-auto custom-scrollbar max-h-[400px]">
+                <table class="w-full text-left text-[11px] border-separate border-spacing-0">
+                    <thead>
+                        <tr class="text-slate-400 bg-slate-50/30 sticky top-0 z-10 backdrop-blur-sm">
+                            <th class="px-6 py-4 font-black uppercase tracking-tighter">
+                                <div class="th-content">Data <span onclick="toggleNtpFilter(event,'data')" class="filter-icon">▼</span></div>
+                                <div id="ntp-filter-data" class="db-select custom-scrollbar"></div>
+                            </th>
+                            <th class="px-6 py-4 font-black uppercase tracking-tighter">
+                                <div class="th-content">Unidade de Negócio <span onclick="toggleNtpFilter(event,'unidade')" class="filter-icon">▼</span></div>
+                                <div id="ntp-filter-unidade" class="db-select custom-scrollbar"></div>
+                            </th>
+                            <th class="px-6 py-4 font-black uppercase tracking-tighter">
+                                <div class="th-content">Status <span onclick="toggleNtpFilter(event,'status')" class="filter-icon">▼</span></div>
+                                <div id="ntp-filter-status" class="db-select custom-scrollbar"></div>
+                            </th>
+                            <th class="px-6 py-4 font-black uppercase tracking-tighter">
+                                <div class="th-content">ID/OS <span onclick="toggleNtpFilter(event,'id')" class="filter-icon">▼</span></div>
+                                <div id="ntp-filter-id" class="db-select custom-scrollbar"></div>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="ntpTableBody" class="divide-y divide-slate-50"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <div id="view-db" class="hidden fade-in">
+         <div class="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+            <div class="p-5 bg-slate-50/50 border-b border-slate-100">
+                <h3 class="text-xs font-black text-slate-800 uppercase tracking-widest">Base de Dados Completa</h3>
+            </div>
+            <div class="overflow-x-auto custom-scrollbar max-h-[600px]">
+                <table class="w-full text-left text-[11px] border-separate border-spacing-0" id="dbTable">
+                    <thead id="dbHeader"></thead>
+                    <tbody id="dbBody" class="divide-y divide-slate-50"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- botão escondido para acessar Base de Dados (aparece apenas em admin) -->
+<button id="btn-db-hidden" onclick="switchTab('db')" class="fixed bottom-4 right-4 bg-white border rounded-full p-2 shadow-sm text-xs hidden" title="Base de Dados (oculto)">DB</button>
+
+<script>
+    Chart.register(ChartDataLabels);
+
+    // Make datalabels more robust so labels don't disappear at peaks
+    Chart.defaults.set('plugins.datalabels', {
+        color: '#0f172a',
+        font: { weight: 'bold', size: 11 },
+        anchor: 'end',
+        align: 'top',
+        offset: -2,
+        clamp: false,
+        clip: false
+    });
+
+    // Data containers
+    let rawData = []; 
+    let ntpRawData = []; 
+    let dbRawData = [];
+    let dbColumns = [];
+    let charts = {};
+    let currentUser = 'viewer'; 
+    let currentYear = 2026;
+
+    // estado para filtros da tabela NTP e SLA
+    let ntpFilterState = {};
+    let slaFilterState = {};
+
+    document.addEventListener('DOMContentLoaded', () => {
+        lucide.createIcons();
+        const storedData = localStorage.getItem('sla_dashboard_data_v2');
+        if (storedData) try { rawData = JSON.parse(storedData); } catch(e){ rawData = []; }
+        
+        const storedNtp = localStorage.getItem('ntp_dashboard_data_v2');
+        if (storedNtp) try { ntpRawData = JSON.parse(storedNtp); } catch(e){ ntpRawData = []; }
+
+        const storedDb = localStorage.getItem('db_dashboard_data_v2');
+        if (storedDb) {
+            try {
+                const parsed = JSON.parse(storedDb);
+                dbRawData = parsed.rows || [];
+                dbColumns = parsed.cols || [];
+            } catch (e) {
+                console.warn('Erro ao ler db_dashboard_data_v2:', e);
+                dbRawData = [];
+                dbColumns = [];
+            }
+        }
+
+        init();
+    });
+
+    function init() {
+        populateUnidadeFilter();
+        updateDashboard();
+        if(ntpRawData.length > 0) processNTPData();
+        if(dbRawData.length > 0) renderDatabase();
+    }
+
+    function login(isAdmin) {
+        const pwd = document.getElementById('passwordInput').value;
+        const overlay = document.getElementById('loginOverlay');
+        
+        if (isAdmin) {
+            if (pwd === "123") {
+                currentUser = 'admin';
+                document.getElementById('btnZerar').classList.remove('hidden');
+                overlay.classList.add('hidden');
+                // mostrar botão escondido de DB para admin
+                document.getElementById('btn-db-hidden').classList.remove('hidden');
+                showToast("Modo Admin Ativo");
+            } else {
+                alert("Senha incorreta!");
+            }
+        } else {
+            currentUser = 'viewer';
+            document.getElementById('btnZerar').classList.add('hidden');
+            overlay.classList.add('hidden');
+            document.getElementById('btn-db-hidden').classList.add('hidden');
+        }
+    }
+
+    function checkPermission() {
+        if (currentUser !== 'admin') {
+            alert("Ação permitida apenas para administradores.");
+            return false;
+        }
+        return true;
+    }
+
+    function clearDatabase() {
+        if(!checkPermission()) return;
+        if(confirm("Confirma limpar TODOS os dados?")) {
+            localStorage.removeItem('sla_dashboard_data_v2');
+            localStorage.removeItem('ntp_dashboard_data_v2');
+            localStorage.removeItem('db_dashboard_data_v2');
+            rawData = [];
+            ntpRawData = [];
+            dbRawData = [];
+            location.reload();
+        }
+    }
+
+    function switchTab(tab) {
+        document.querySelectorAll('.nav-btn').forEach(btn => {
+            btn.classList.remove('active', 'inactive');
+            btn.classList.add('inactive');
+        });
+        const btn = document.getElementById('btn-' + tab);
+        if(btn) { btn.classList.remove('inactive'); btn.classList.add('active'); }
+
+        ['sla','ntp','db'].forEach(v => {
+            const view = document.getElementById('view-' + v);
+            if(view) view.classList.add('hidden');
+        });
+
+        const target = document.getElementById('view-' + tab);
+        if(target) target.classList.remove('hidden');
+        
+        if(tab === 'ntp' && ntpRawData.length > 0) processNTPData();
+        if(tab === 'db' && dbRawData.length > 0) renderDatabase();
+    }
+
+    function changeYear(year) {
+        currentYear = parseInt(year);
+        init();
+        processNTPData();
+        showToast(`Ano alterado para ${currentYear}`);
+    }
+
+    function handleFileSelect(event, type) {
+        if (!checkPermission()) { event.target.value = ''; return; }
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const content = e.target.result;
+            if (type === 'ntp') {
+                parseNTPCSV(content);
+            } else if (type === 'sla_abertura') {
+                mergeSlaData(content, 'abertura');
+            } else if (type === 'sla_fechamento') {
+                mergeSlaData(content, 'fechamento');
+            }
+        };
+        reader.readAsText(file, 'ISO-8859-1');
+        event.target.value = '';
+    }
+
+    /* -------------------------
+       Flexible CSV parser utils
+       ------------------------- */
+    function parseCsvToObjects(csv) {
+        const lines = csv.split(/\r\n|\n/).filter(l => l.trim() !== '');
+        if (lines.length === 0) return { headers: [], rows: [] };
+        const first = lines[0];
+        const delim = first.indexOf(';') !== -1 ? ';' : (first.indexOf('\t') !== -1 ? '\t' : ',');
+        const headers = lines[0].split(delim).map(h => h.replace(/["']/g,'').trim());
+        const rows = [];
+        for (let i = 1; i < lines.length; i++) {
+            const cols = lines[i].split(delim).map(c => c.replace(/["']/g,'').trim());
+            const obj = {};
+            headers.forEach((h, idx) => obj[h || `col${idx}`] = cols[idx] || '');
+            rows.push(obj);
+        }
+        return { headers, rows };
+    }
+
+    function findHeader(headers, patterns) {
+        for (const p of patterns) {
+            const rx = new RegExp(p, 'i');
+            const found = headers.find(h => rx.test(h));
+            if (found) return found;
+        }
+        return null;
+    }
+
+    function parseMonthFromString(s) {
+        if (!s) return null;
+        const months = { '1':'JANEIRO','01':'JANEIRO','2':'FEVEREIRO','02':'FEVEREIRO','3':'MARÇO','03':'MARÇO','4':'ABRIL','04':'ABRIL','5':'MAIO','05':'MAIO','6':'JUNHO','06':'JUNHO','7':'JULHO','07':'JULHO','8':'AGOSTO','08':'AGOSTO','9':'SETEMBRO','09':'SETEMBRO','10':'OUTUBRO','11':'NOVEMBRO','12':'DEZEMBRO' };
+        // ISO yyyy-mm-dd
+        const iso = /([0-9]{4})[-\/]([0-9]{1,2})[-\/]([0-9]{1,2})/.exec(s);
+        if (iso) return months[iso[2]] || null;
+        // BR dd/mm/yyyy
+        const br = /([0-9]{1,2})[\/\-]([0-9]{1,2})[\/\-]([0-9]{2,4})/.exec(s);
+        if (br) return months[br[2]] || null;
+        // month name
+        const nm = (''+s).toUpperCase();
+        for (const v of Object.values(months)) if (nm.includes(v)) return v;
+        return null;
+    }
+
+    function cleanUnitName(name) {
+        if(!name) return "Indefinido";
+        return name.replace(/^[0-9]+\s*[-–]\s*/, '').trim();
+    }
+
+    /* -------------------------------------------------
+       mergeSlaData: COUNT LINES (1 linha = 1 chamado)
+       ------------------------------------------------- */
+    function mergeSlaData(csv, tipoImportacao) {
+        // parse flexible CSV
+        const parsed = parseCsvToObjects(csv);
+        if (!parsed.rows.length) { showToast('CSV vazio ou formato inválido'); return; }
+
+        const headers = parsed.headers;
+        const rows = parsed.rows;
+        // heuristics to find useful columns
+        const unidadeHdr = findHeader(headers, ['unidade','posto','loja','filial','estabelecimento','unidade de negocio','business unit']);
+        const mesHdr = findHeader(headers, ['mes','mês','month']);
+        const dataHdr = findHeader(headers, ['data','date','dt','emissao','data abertura','data fechamento']);
+        // We'll not rely on a numeric "quantidade" column — count rows instead
+
+        // Build map from existing rawData
+        const dataMap = {};
+        rawData.forEach(item => { dataMap[item.idKey] = item; });
+
+        let updatedCount = 0;
+        rows.forEach(r => {
+            let unidade = unidadeHdr ? (r[unidadeHdr] || '') : '';
+            unidade = unidade ? cleanUnitName(unidade) : 'Indefinido';
+
+            // determine month
+            let mes = 'JANEIRO';
+            if (mesHdr && r[mesHdr]) {
+                mes = ('' + r[mesHdr]).toUpperCase();
+            } else if (dataHdr && r[dataHdr]) {
+                const m = parseMonthFromString(r[dataHdr]);
+                if (m) mes = m;
+            } else {
+                // try to find any date-like column in row
+                for (const key of Object.keys(r)) {
+                    if (r[key] && /[0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4}/.test(r[key])) {
+                        const m = parseMonthFromString(r[key]);
+                        if (m) { mes = m; break; }
+                    }
+                }
+            }
+
+            const idKey = `${unidade}-${mes}-${currentYear}`;
+            if (!dataMap[idKey]) dataMap[idKey] = { idKey, unidade, estado: (r['estado']||r['UF']||'BR'), mes, ano: currentYear, aberturas:0, fechamentos:0 };
+
+            // COUNT one line as one chamado
+            if (tipoImportacao === 'abertura') dataMap[idKey].aberturas = (dataMap[idKey].aberturas || 0) + 1;
+            else dataMap[idKey].fechamentos = (dataMap[idKey].fechamentos || 0) + 1;
+
+            updatedCount++;
+        });
+
+        rawData = Object.values(dataMap);
+        try { localStorage.setItem('sla_dashboard_data_v2', JSON.stringify(rawData)); } catch(e){ console.warn('Erro ao salvar SLA', e); }
+        init();
+        showToast(`${updatedCount} linhas processadas (${tipoImportacao}).`);
+    }
+
+    /* ------------------------------
+       parseNTPCSV (melhora parsing)
+       ------------------------------ */
+    function parseNTPCSV(csv) {
+        const lines = csv.split(/\r\n|\n/).filter(l => l.trim() !== '');
+        if (lines.length === 0) { showToast('CSV NTP vazio'); return; }
+
+        // detect delimiter and headers
+        const delim = lines[0].indexOf(';') !== -1 ? ';' : (lines[0].indexOf('\t') !== -1 ? '\t' : ',');
+        const headers = lines[0].split(delim).map(h => h.replace(/["']/g,'').trim());
+        dbColumns = headers;
+        const data = [];
+        const fullRows = [];
+
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) continue;
+            const cols = line.split(delim).map(c => c.replace(/["']/g,'').trim());
+
+            // build rowObj
+            let rowObj = {};
+            headers.forEach((h, idx) => rowObj[h] = cols[idx] || "");
+            fullRows.push(rowObj);
+
+            // detect if this row is an NTP (keep flexible)
+            const upper = line.toUpperCase();
+            const isNtp = upper.includes('NTP') || (cols[7] && cols[7].toUpperCase().includes('NTP'));
+            if (!isNtp) continue;
+
+            // parse date robustly (prefer column index 5, else find a header named date/data)
+            let rawDate = cols[5] || '';
+            if (!rawDate) {
+                const dateHeader = headers.find(h => /data|date|dt|emissao/i.test(h));
+                if (dateHeader) rawDate = rowObj[dateHeader] || '';
+            }
+            let dateIso = "N/A";
+            let year = null;
+            if (rawDate) {
+                // try dd/mm/yyyy
+                const br = /([0-9]{1,2})[\/\-]([0-9]{1,2})[\/\-]([0-9]{2,4})/.exec(rawDate);
+                if (br) {
+                    let yy = br[3];
+                    if (yy.length === 2) yy = '20' + yy;
+                    year = parseInt(yy);
+                    const mm = br[2].padStart(2,'0');
+                    const dd = br[1].padStart(2,'0');
+                    dateIso = `${year}-${mm}-${dd}`;
+                } else {
+                    // iso
+                    const iso = /([0-9]{4})[-\/]([0-9]{1,2})[-\/]([0-9]{1,2})/.exec(rawDate);
+                    if (iso) {
+                        year = parseInt(iso[1]);
+                        dateIso = rawDate.substring(0,10);
+                    }
+                }
+            }
+
+            // unit from column 6 or header hint
+            let unitFull = cols[6] || '';
+            if(!unitFull) {
+                const unitHeader = headers.find(h => /unidade|posto|loja|filial|estabelecimento/i.test(h));
+                if (unitHeader) unitFull = rowObj[unitHeader] || '';
+            }
+            let unitClean = cleanUnitName((unitFull || '').replace(/"/g, ''));
+            if (!unitClean) unitClean = 'Indefinido';
+
+            // tecnico
+            let tecnico = cols[8] || '';
+            if (!tecnico) {
+                const techHeader = headers.find(h => /tecnic|tecnico|responsavel|tech/i.test(h));
+                if (techHeader) tecnico = rowObj[techHeader] || '';
+            }
+            tecnico = tecnico.replace(/"/g,'').trim();
+            if (tecnico.length < 3) tecnico = "Téc. Indefinido";
+
+            // estado guess
+            let estado = "N/A";
+            const ufs = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"];
+            ufs.forEach(uf => { if(unitClean.toUpperCase().includes(uf)) estado = uf; });
+
+            // ID/OS from column E (index 4) or header
+            let osId = cols[4] || '';
+            if(!osId) {
+                const osHeader = headers[4] || headers.find(h => /os|id|pedido|numero|n[oº]/i.test(h));
+                if (osHeader) osId = rowObj[osHeader] || '';
+            }
+
+            data.push({ 
+                id: osId, 
+                unidade: unitClean, 
+                tecnico: tecnico, 
+                estado: estado, 
+                data: dateIso, 
+                ano: year,
+                status: cols[7] || rowObj[headers[7]] || "",
+                finalizado: cols[10] || rowObj[headers[10]] || "",
+                nomePosto: cols[12] || rowObj[headers[12]] || "",
+                extras: rowObj
+            });
+        }
+
+        ntpRawData = data;
+        dbRawData = fullRows;
+
+        try {
+            localStorage.setItem('ntp_dashboard_data_v2', JSON.stringify(ntpRawData));
+        } catch (e) {
+            console.warn('Não foi possível persistir ntp_dashboard_data_v2:', e);
+        }
+
+        // Persist DB data carefully to avoid localStorage quota issues (persist apenas amostra)
+        try {
+            const MAX_DB_ROWS = 500;
+            const safeRows = dbRawData.slice(0, MAX_DB_ROWS);
+            localStorage.setItem('db_dashboard_data_v2', JSON.stringify({ cols: dbColumns, rows: safeRows, truncated: dbRawData.length > MAX_DB_ROWS }));
+        } catch (e) {
+            console.warn('DB data too large for localStorage, skipping persistence.', e);
+            try {
+                localStorage.setItem('db_dashboard_data_v2', JSON.stringify({ cols: dbColumns, rows: [], truncated: true }));
+            } catch (err) {
+                console.warn('Unable to persist any DB data.', err);
+            }
+        }
+
+        processNTPData();
+        renderDatabase();
+        showToast(`${data.length} NTPs importados e Base de Dados atualizada!`);
+    }
+
+    function populateUnidadeFilter() {
+        const select = document.getElementById('unidadeFilter');
+        if(!select) return;
+        const unidades = [...new Set(rawData.map(i => i.unidade))].sort();
+        select.innerHTML = '<option value="Todas">Todas Unidades</option>';
+        unidades.forEach(u => {
+            const op = document.createElement('option');
+            op.value = u; op.innerText = u;
+            select.appendChild(op);
+        });
+    }
+
+    function changeUnidade(val) { activeUnidade = val; updateDashboard(); }
+    function changeEstado(val) { activeEstado = val; updateDashboard(); }
+
+    function updateDashboard() {
+        let filtered = rawData.filter(d => d.ano === currentYear);
+        if (typeof activeUnidade !== 'undefined' && activeUnidade !== "Todas") filtered = filtered.filter(d => d.unidade === activeUnidade);
+        const estadosDisp = [...new Set(filtered.map(d => d.estado))].sort();
+        const estSelect = document.getElementById('estadoFilter');
+        if(estSelect){
+            const currEst = estSelect.value;
+            estSelect.innerHTML = '<option value="Todos">Todos Estados</option>';
+            estadosDisp.forEach(uf => {
+                const op = document.createElement('option');
+                op.value = uf; op.innerText = uf;
+                estSelect.appendChild(op);
+            });
+            if(estadosDisp.includes(currEst)) estSelect.value = currEst;
+            else activeEstado = "Todos";
+        }
+        if(typeof activeEstado !== 'undefined' && activeEstado !== "Todos") filtered = filtered.filter(d => d.estado === activeEstado);
+        const totalAbs = filtered.reduce((a,c) => a+(c.aberturas||0), 0);
+        const totalFec = filtered.reduce((a,c) => a+(c.fechamentos||0), 0);
+        let slaRate = totalAbs > 0 ? (totalFec / totalAbs) * 100 : 0;
+        if(slaRate > 100) slaRate = 100;
+        const statA = document.getElementById('statAberturas'); if(statA) statA.innerText = totalAbs.toLocaleString();
+        const statF = document.getElementById('statFechamentos'); if(statF) statF.innerText = totalFec.toLocaleString();
+        const statS = document.getElementById('statSLA'); if(statS) statS.innerText = slaRate.toFixed(1) + '%';
+        const box = document.getElementById('slaColorBox');
+        if(box) box.className = `p-3 rounded-xl transition-colors ${slaRate>=90?'bg-emerald-100 text-emerald-600':(slaRate>=75?'bg-yellow-100 text-yellow-600':'bg-rose-100 text-rose-600')}`;
+        updateSlaCharts(filtered);
+        filterSlaTable(filtered);
+    }
+
+    function updateSlaCharts(data) {
+        const months = ["JANEIRO","FEVEREIRO","MARÇO","ABRIL","MAIO","JUNHO","JULHO","AGOSTO","SETEMBRO","OUTUBRO","NOVEMBRO","DEZEMBRO"];
+        const mData = months.map(m => {
+            const sub = data.filter(d => d.mes === m);
+            const abs = sub.reduce((a,c) => a+(c.aberturas||0), 0);
+            const fec = sub.reduce((a,c) => a+(c.fechamentos||0), 0);
+            const sla = abs > 0 ? (fec/abs)*100 : 0;
+            return { m, abs, fec, sla: sla>100?100:sla };
+        });
+
+        if(charts['sla']) charts['sla'].destroy();
+        const ctxSla = document.getElementById('slaChart').getContext('2d');
+        const gradientSla = ctxSla.createLinearGradient(0, 0, 0, 300);
+        gradientSla.addColorStop(0, 'rgba(37, 99, 235, 0.2)');
+        gradientSla.addColorStop(1, 'rgba(37, 99, 235, 0)');
+
+        charts['sla'] = new Chart(ctxSla, {
+            type: 'line',
+            data: {
+                labels: months.map(m=>m.substring(0,3)),
+                datasets: [
+                    { 
+                        label:'SLA %', 
+                        data: mData.map(d=>d.sla), 
+                        borderColor:'#2563eb', 
+                        borderWidth: 3,
+                        tension: 0.4, 
+                        fill:true,
+                        backgroundColor: gradientSla,
+                        pointBackgroundColor: '#fff',
+                        pointBorderColor: '#2563eb',
+                        pointBorderWidth: 2,
+                        pointRadius: 4,
+                        datalabels: { 
+                            formatter: (v) => v > 0 ? v.toFixed(0)+'%' : '',
+                            offset: 5,
+                            align: 'top',
+                            clamp: false,
+                            clip: false
+                        }
+                    },
+                    {
+                        label: 'Meta',
+                        data: Array(12).fill(95),
+                        borderColor: '#fb7185',
+                        borderWidth: 1.5,
+                        borderDash: [5, 5],
+                        fill: false,
+                        pointRadius: 0,
+                        datalabels: { display: false }
+                    }
+                ]
+            },
+            options: { 
+                responsive:true, maintainAspectRatio:false, layout:{padding:{right:40, top:30, bottom:10}},
+                scales:{
+                    y:{min:0, max:110, grid:{color:'#f1f5f9'}, ticks:{font:{size:10}}},
+                    x:{grid:{display:false}}
+                }, 
+                plugins:{legend:{display:false}}
+            }
+        });
+
+        if(charts['vol']) charts['vol'].destroy();
+        charts['vol'] = new Chart(document.getElementById('volumeChart'), {
+            type: 'bar',
+            data: {
+                labels: months.map(m=>m.substring(0,3)),
+                datasets: [
+                    { label:'Abert', data: mData.map(d=>d.abs), backgroundColor:'#94a3b8', borderRadius:3, datalabels:{align:'center', color:'white', clamp:false, clip:false} },
+                    { label:'Fech', data: mData.map(d=>d.fec), backgroundColor:'#10b981', borderRadius:3, datalabels:{align:'center', color:'white', clamp:false, clip:false} }
+                ]
+            },
+            options: { responsive:true, maintainAspectRatio:false, layout:{padding:{right:40}}, plugins:{legend:{position:'bottom'}}, scales:{x:{grid:{display:false}}}}
+        });
+    }
+
+    function filterSlaTable(preFiltered = null) {
+        let data = preFiltered || rawData.filter(d => d.ano === currentYear);
+        if(!preFiltered) {
+             if (typeof activeUnidade !== 'undefined' && activeUnidade !== "Todas") data = data.filter(d => d.unidade === activeUnidade);
+             if (typeof activeEstado !== 'undefined' && activeEstado !== "Todos") data = data.filter(d => d.estado === activeEstado);
+        }
+        const text = document.getElementById('slaTableSearch')?.value?.toLowerCase() || '';
+        if(text) data = data.filter(r => (r.unidade||'').toLowerCase().includes(text));
+
+        // apply SLA column filters
+        for(const k in slaFilterState){
+            const v = slaFilterState[k]; if(!v) continue;
+            data = data.filter(r => (''+ (r[k]||'')).toString() === v);
+        }
+
+        const tbody = document.getElementById('tableBody');
+        if(!tbody) return;
+        tbody.innerHTML = '';
+        data.slice(0, 1000).forEach(row => {
+            const tr = document.createElement('tr');
+            tr.className = "hover:bg-slate-50 transition-colors";
+            const sla = row.aberturas > 0 ? (row.fechamentos/row.aberturas)*100 : 0;
+            const color = sla >= 90 ? 'text-emerald-600' : (sla>=75?'text-yellow-600':'text-rose-600');
+            tr.innerHTML = `
+                <td class="px-6 py-3 font-bold text-slate-700 border-b border-slate-50 text-[10px]">${row.unidade}</td>
+                <td class="px-6 py-3 text-slate-500 font-medium border-b border-slate-50 text-[10px]">${row.mes}</td>
+                <td class="px-6 py-3 text-right text-slate-600 border-b border-slate-50 text-[11px]">${row.aberturas}</td>
+                <td class="px-6 py-3 text-right text-slate-600 border-b border-slate-50 text-[11px]">${row.fechamentos}</td>
+                <td class="px-6 py-3 text-right font-black ${color} border-b border-slate-50 text-[11px]">${sla.toFixed(1)}%</td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        if(data.length === 0) tbody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-sm text-slate-400 italic">Nenhum registro encontrado.</td></tr>';
+    }
+
+    /* SLA filter dropdowns (similar behavior to NTP) */
+    function toggleSlaFilter(e, key) {
+        e.stopPropagation();
+        ['sla-filter-unidade','sla-filter-mes','sla-filter-aberturas','sla-filter-fechamentos'].forEach(id => {
+            if(id !== `sla-filter-${key}`) document.getElementById(id)?.classList.remove('show');
+        });
+
+        const dropdown = document.getElementById(`sla-filter-${key}`);
+        if(!dropdown) return;
+        if(dropdown.classList.contains('show')) { dropdown.classList.remove('show'); return; }
+
+        let filtered = rawData.filter(d => d.ano === currentYear);
+        if (typeof activeUnidade !== 'undefined' && activeUnidade !== "Todas") filtered = filtered.filter(d => d.unidade === activeUnidade);
+        if (typeof activeEstado !== 'undefined' && activeEstado !== "Todos") filtered = filtered.filter(d => d.estado === activeEstado);
+
+        const keyMap = { 'unidade':'unidade', 'mes':'mes', 'aberturas':'aberturas', 'fechamentos':'fechamentos' };
+        const uniqueValues = [...new Set(filtered.map(r => (''+(r[keyMap[key]]||''))))].filter(v=>v!=='').sort((a,b)=> (isNaN(a)? (''+a).localeCompare(b) : Number(a)-Number(b)));
+
+        let html = `<div onclick="applySlaFilter('${key}', 'ALL')" class="text-blue-600 font-bold">Limpar Filtro</div>`;
+        if(uniqueValues.length === 0) html += `<div class="empty">(nenhum valor disponível)</div>`;
+        uniqueValues.forEach(v => { html += `<div onclick="applySlaFilter('${key}', '${(''+v).replace(/'/g,"\\'")}')" class="truncate">${v}</div>`; });
+        dropdown.innerHTML = html;
+        dropdown.classList.add('show');
+        document.addEventListener('click', closeSlaFilters);
+    }
+    function closeSlaFilters(){ ['sla-filter-unidade','sla-filter-mes','sla-filter-aberturas','sla-filter-fechamentos'].forEach(id => document.getElementById(id)?.classList.remove('show')); document.removeEventListener('click', closeSlaFilters); }
+    function applySlaFilter(key, value){ if(value === 'ALL') delete slaFilterState[key]; else slaFilterState[key] = value; filterSlaTable(); }
+
+    /* --------------------------
+       NTP processing & monthly
+       -------------------------- */
+    function processNTPData() {
+        // Use only entries where ano is set to avoid wrong grouping
+        const baseData = ntpRawData.filter(d => d.ano !== null && d.ano !== undefined);
+        
+        // Filtro Unidade (Antigo Posto)
+        const units = ["Todos", ...new Set(baseData.map(d => d.unidade).filter(Boolean))].sort();
+        const uSelect = document.getElementById('ntpUnitFilter');
+        if(uSelect){
+            uSelect.innerHTML = '';
+            units.forEach(u => {
+                const op = document.createElement('option');
+                op.value = u; op.innerText = u;
+                if(u==="Todos") uSelect.prepend(op); else uSelect.appendChild(op);
+            });
+        }
+        
+        updateNtpFilters('unit');
+    }
+
+    function updateNtpFilters(changedLevel) {
+        // Build filtered set according to main UI controls (unit, posto and individual column filters)
+        let filtered = ntpRawData.filter(d => d.ano === currentYear);
+        const uVal = document.getElementById('ntpUnitFilter')?.value || 'Todos';
+        const pSelect = document.getElementById('ntpPostoFilter');
+        const pVal = pSelect?.value || 'Todos';
+
+        if(uVal !== "Todos") filtered = filtered.filter(d => d.unidade === uVal);
+        if(pVal !== "Todos") filtered = filtered.filter(d => d.nomePosto === pVal);
+
+        // Rebuild posto options based on currently filtered set
+        if(changedLevel === 'unit' && pSelect) {
+            const postos = ["Todos", ...new Set(filtered.map(d => d.nomePosto).filter(Boolean))].sort();
+            pSelect.innerHTML = '';
+            postos.forEach(p => {
+                const op = document.createElement('option'); op.value = p; op.innerText = p;
+                if(p==="Todos") pSelect.prepend(op); else pSelect.appendChild(op);
+            });
+            pSelect.value = "Todos";
+        }
+        
+        // Update dropdown unique values to reflect current filtered set, avoiding UI collapse when empty
+        updateNtpFilterDropdownValues(filtered);
+        
+        filterNtpTable();
+    }
+
+    function updateNtpFilterDropdownValues(filteredSet) {
+        const keys = ['data','unidade','status','id'];
+        keys.forEach(k => {
+            const el = document.getElementById(`ntp-filter-${k}`);
+            if(!el) return;
+            const uniqueValues = [...new Set(filteredSet.map(r => (r[k]||"") ))].filter(v=>v).sort();
+            let html = `<div onclick="applyNtpFilter('${k}', 'ALL')" class="text-blue-600 font-bold">Limpar Filtro</div>`;
+            if(uniqueValues.length === 0) html += `<div class="empty">(nenhum valor disponível)</div>`;
+            uniqueValues.forEach(v => { html += `<div onclick="applyNtpFilter('${k}', '${(v+"").replace(/'/g, "\\'")}')" class="truncate">${v}</div>`; });
+            el.innerHTML = html;
+        });
+    }
+
+    function filterNtpTable() {
+        let data = ntpRawData.filter(d => d.ano === currentYear);
+        const uVal = document.getElementById('ntpUnitFilter')?.value || 'Todos';
+        const pVal = document.getElementById('ntpPostoFilter')?.value || 'Todos';
+        const search = (document.getElementById('ntpSearch')?.value || '').toLowerCase();
+        
+        if(uVal !== "Todos") data = data.filter(d => d.unidade === uVal);
+        if(pVal !== "Todos") data = data.filter(d => d.nomePosto === pVal);
+        if(search) {
+            data = data.filter(d => (
+                (d.id||"").toLowerCase().includes(search) ||
+                (d.unidade||"").toLowerCase().includes(search) ||
+                (d.status||"").toLowerCase().includes(search) ||
+                (d.data||"").toLowerCase().includes(search)
+            ));
+        }
+        
+        // Aplicar filtros por coluna (NTP table)
+        for(const k in ntpFilterState) {
+            const v = ntpFilterState[k];
+            if(!v) continue;
+            data = data.filter(r => ((r[k]||"") + "").toString() === v);
+        }
+        
+        updateNtpVisuals(data);
+    }
+
+    function updateNtpVisuals(data) {
+        // monthly aggregation (year = currentYear)
+        const monthCounts = { '01':0,'02':0,'03':0,'04':0,'05':0,'06':0,'07':0,'08':0,'09':0,'10':0,'11':0,'12':0 };
+        data.forEach(d => {
+            if(!d.data || d.data === 'N/A') return;
+            // data expected as YYYY-MM-DD (we created it when parsing)
+            const p = d.data.split('-');
+            if (p.length >= 2) {
+                const y = parseInt(p[0]);
+                const m = p[1].padStart(2,'0');
+                if (y === currentYear && monthCounts.hasOwnProperty(m)) monthCounts[m] += 1;
+            }
+        });
+        const monthsLabels = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+        const countsArr = Object.keys(monthCounts).map(k => monthCounts[k]);
+
+        // main chart
+        if(charts['ntpLine']) charts['ntpLine'].destroy();
+        charts['ntpLine'] = new Chart(document.getElementById('ntpChart'), {
+            type: 'line',
+            data: {
+                labels: monthsLabels,
+                datasets: [{
+                    label: 'NTPs por mês', data: countsArr,
+                    borderColor: '#f43f5e', backgroundColor: 'rgba(244,63,94,0.1)', fill: true, tension: 0.3,
+                    datalabels: { align: 'top', display: 'auto', color: '#000', font: { weight: 'bold' }, clamp:false, clip:false }
+                }]
+            },
+            options: { responsive:true, maintainAspectRatio:false, layout:{padding:{right:40,top:20}}, plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}}} }
+        });
+
+        // top 10
+        const counts = {};
+        data.forEach(d => { counts[d.unidade] = (counts[d.unidade]||0) + 1; });
+        const sorted = Object.entries(counts).sort((a,b) => b[1]-a[1]).slice(0, 10);
+        
+        if(charts['ntpBar']) charts['ntpBar'].destroy();
+        charts['ntpBar'] = new Chart(document.getElementById('ntpBarChart'), {
+            type: 'bar',
+            data: {
+                labels: sorted.map(i => i[0]),
+                datasets: [{
+                    label: 'Qtd',
+                    data: sorted.map(i => i[1]),
+                    backgroundColor: '#64748b',
+                    borderRadius: 4,
+                    barThickness: 15,
+                    datalabels: { anchor: 'end', align: 'end', color: '#000', font: { weight: 'bold' }, clamp:false, clip:false }
+                }]
+            },
+            options: { 
+                indexAxis: 'y',
+                responsive: true, 
+                maintainAspectRatio: false, 
+                plugins: { legend: { display: false } },
+                scales: { x: { display: false }, y: { grid: { display: false } } },
+                layout: { padding: { right: 30 } }
+            }
+        });
+
+        // comparative monthly chart: bars + % month-over-month
+        const pctChange = countsArr.map((v,i) => {
+            if (i === 0) return 0;
+            const prev = countsArr[i-1] || 1;
+            return prev === 0 ? 0 : ((v - prev) / prev) * 100;
+        });
+
+        if(charts['ntpYear']) charts['ntpYear'].destroy();
+        charts['ntpYear'] = new Chart(document.getElementById('ntpYearChart'), {
+            data: {
+                labels: monthsLabels,
+                datasets: [
+                    { type: 'bar', label: 'NTPs / Mês', data: countsArr, datalabels:{anchor:'end',align:'end',clamp:false,clip:false} },
+                    { type: 'line', label: '% Mês a Mês', data: pctChange.map(v => v.toFixed(1)), borderColor: '#2563eb', yAxisID: 'pctAxis', tension:0.3, fill:false,
+                      datalabels:{formatter: (v) => v != 0 ? v + '%' : '', anchor:'end', align:'top'} }
+                ]
+            },
+            options: { 
+                responsive:true, maintainAspectRatio:false, layout:{padding:{right:20}}, plugins:{legend:{position:'bottom'}},
+                scales:{ y:{ beginAtZero:true }, pctAxis: { position: 'right', grid: { display: false }, ticks: { callback: v => v + '%' } } }
+            }
+        });
+
+        // Badge percentual do ano selecionado
+        const totalAll = ntpRawData.length || 1;
+        const pct = (data.length / totalAll) * 100;
+        const badge = document.getElementById('ntpPercentBadge');
+        if(badge) badge.innerText = `Ano ${currentYear}: ${data.length} NTP(s) — ${pct.toFixed(1)}% do total carregado`;
+
+        // Table render
+        const tbody = document.getElementById('ntpTableBody');
+        if(!tbody) return;
+        tbody.innerHTML = '';
+        data.slice(0, 1000).forEach((row, index) => {
+            const tr = document.createElement('tr');
+            tr.className = "hover:bg-rose-50 cursor-pointer transition-colors";
+            tr.onclick = () => openModal(row);
+            tr.innerHTML = `
+                <td class="px-6 py-3 text-slate-500 border-b border-slate-50 text-[10px]">${row.data}</td>
+                <td class="px-6 py-3 font-bold text-slate-700 border-b border-slate-50 text-[10px]">${row.unidade}</td>
+                <td class="px-6 py-3 text-slate-500 border-b border-slate-50 text-[10px] font-bold text-rose-600">${row.status}</td>
+                <td class="px-6 py-3 border-b border-slate-50"><span class="bg-rose-100 text-rose-700 px-2 py-0.5 rounded text-[9px] font-bold">${row.id}</span></td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        if(data.length === 0) {
+            const t = document.createElement('tr');
+            t.innerHTML = '<td colspan="4" class="p-4 text-center text-sm text-slate-400 italic">Nenhum registro encontrado para os filtros selecionados.</td>';
+            tbody.appendChild(t);
+        }
+    }
+
+    function openModal(row) {
+        const modal = document.getElementById('infoModal');
+        const content = document.getElementById('modalContent');
+        if(!modal || !content) return;
+        modal.classList.remove('hidden');
+        
+        let html = `
+            <div class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                     <div class="bg-slate-50 p-3 rounded-lg">
+                        <p class="text-[10px] uppercase text-slate-400 font-bold">Unidade</p>
+                        <p class="font-bold text-slate-700">${row.unidade}</p>
+                    </div>
+                    <div class="bg-slate-50 p-3 rounded-lg">
+                        <p class="text-[10px] uppercase text-slate-400 font-bold">Técnico</p>
+                        <p class="font-bold text-slate-700">${row.tecnico}</p>
+                    </div>
+                    <div class="bg-blue-50 p-3 rounded-lg">
+                        <p class="text-[10px] uppercase text-blue-400 font-bold">Posto</p>
+                        <p class="font-bold text-blue-700">${row.nomePosto}</p>
+                    </div>
+                     <div class="bg-emerald-50 p-3 rounded-lg">
+                        <p class="text-[10px] uppercase text-emerald-400 font-bold">Finalizado Em</p>
+                        <p class="font-bold text-emerald-700">${row.finalizado}</p>
+                    </div>
+                </div>
+                
+                <h4 class="font-bold text-slate-800 text-xs border-b pb-2 pt-2">Dados do Pedido</h4>
+                <div class="grid grid-cols-1 gap-2">
+        `;
+        
+        if(row.extras) {
+            Object.entries(row.extras).forEach(([key, value]) => {
+                if(value && (''+value).trim() !== "") {
+                    html += `
+                        <div class="flex justify-between border-b border-slate-100 py-2 text-xs">
+                            <span class="text-slate-500 font-medium">${key}:</span>
+                            <span class="font-bold text-slate-800">${value}</span>
+                        </div>
+                    `;
+                }
+            });
+        }
+        
+        html += `</div></div>`;
+        content.innerHTML = html;
+    }
+
+    function closeModal() {
+        document.getElementById('infoModal').classList.add('hidden');
+    }
+
+    // --- BASE DE DADOS LOGIC ---
+    let dbFilterState = {};
+
+    function renderDatabase() {
+        if(!dbColumns || dbColumns.length === 0) return;
+        
+        const thead = document.getElementById('dbHeader');
+        const tbody = document.getElementById('dbBody');
+        if(!thead || !tbody) return;
+        
+        // Render Header with Filters
+        let hHtml = '<tr class="bg-slate-100 text-slate-600 sticky top-0 z-10">';
+        dbColumns.forEach((col, idx) => {
+            hHtml += `
+                <th class="px-4 py-3 font-bold text-[10px] border-b border-slate-200 relative group min-w-[120px]">
+                    <div class="th-content">
+                        ${col}
+                        <span onclick="toggleDbFilter(event, ${idx})" class="filter-icon">▼</span>
+                    </div>
+                    <div id="filter-dropdown-${idx}" class="db-select custom-scrollbar"></div>
+                </th>
+            `;
+        });
+        hHtml += '</tr>';
+        thead.innerHTML = hHtml;
+        
+        filterDbTable();
+    }
+
+    function toggleDbFilter(e, colIdx) {
+        e.stopPropagation();
+        document.querySelectorAll('.db-select').forEach(el => {
+            if(el.id !== `filter-dropdown-${colIdx}`) el.classList.remove('show');
+        });
+        
+        const dropdown = document.getElementById(`filter-dropdown-${colIdx}`);
+        if(!dropdown) return;
+        if(dropdown.classList.contains('show')) { dropdown.classList.remove('show'); return; }
+
+        // Build unique values using current full DB dataset (filtered by other dbFilterState)
+        const filteredForDropdown = dbRawData.filter(row => {
+            for(let idx in dbFilterState) {
+                if(parseInt(idx) === colIdx) continue; // don't filter by the same column when building its dropdown
+                if(row[dbColumns[idx]] !== dbFilterState[idx]) return false;
+            }
+            return true;
+        });
+
+        const uniqueValues = [...new Set(filteredForDropdown.map(r => r[dbColumns[colIdx]]))].filter(v=>v).sort();
+        
+        let html = `<div onclick="applyDbFilter(${colIdx}, 'ALL')" class="text-blue-600 font-bold">Limpar Filtro</div>`;
+        if(uniqueValues.length === 0) html += `<div class="empty">(nenhum valor disponível)</div>`;
+        uniqueValues.forEach(v => {
+            html += `<div onclick="applyDbFilter(${colIdx}, '${(v+"").replace(/'/g, "\\'")}')" class="truncate">${v}</div>`;
+        });
+        
+        dropdown.innerHTML = html;
+        dropdown.classList.add('show');
+        
+        document.addEventListener('click', closeDbFilters);
+    }
+    
+    function closeDbFilters() {
+        document.querySelectorAll('.db-select').forEach(el => el.classList.remove('show'));
+        document.removeEventListener('click', closeDbFilters);
+    }
+
+    function applyDbFilter(colIdx, value) {
+        if(value === 'ALL') {
+            delete dbFilterState[colIdx];
+        } else {
+            dbFilterState[colIdx] = value;
+        }
+        filterDbTable();
+    }
+
+    function filterDbTable() {
+        const tbody = document.getElementById('dbBody');
+        if(!tbody) return;
+        tbody.innerHTML = '';
+        
+        let filtered = dbRawData.filter(row => {
+            for(let idx in dbFilterState) {
+                if(row[dbColumns[idx]] !== dbFilterState[idx]) return false;
+            }
+            return true;
+        });
+
+        // Render all filtered rows (user asked to load all). If performance becomes an issue, we can paginate later.
+        if(filtered.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="${dbColumns.length}" class="p-4 text-center text-sm text-slate-400 italic">Nenhum registro encontrado.</td></tr>`;
+            return;
+        }
+
+        filtered.forEach(row => {
+            let tr = '<tr class="hover:bg-slate-50">';
+            dbColumns.forEach(col => {
+                tr += `<td class="px-4 py-2 border-b border-slate-100 text-[10px] truncate max-w-[150px]">${row[col] || ''}</td>`;
+            });
+            tr += '</tr>';
+            tbody.innerHTML += tr;
+        });
+        
+        if(filtered.length > 200) {
+            tbody.innerHTML += `<tr><td colspan="${dbColumns.length}" class="p-2 text-center text-xs text-slate-400 italic">Total de registros filtrados: ${filtered.length}</td></tr>`;
+        }
+    }
+
+    function showToast(msg) {
+        // Simple fallback toast: console
+        console.log(msg);
+    }
+
+    // --- FILTROS ESPECÍFICOS DA TABELA NTP ---
+    function toggleNtpFilter(e, key) {
+        e.stopPropagation();
+        ['ntp-filter-data','ntp-filter-unidade','ntp-filter-status','ntp-filter-id'].forEach(id => {
+            if(id !== `ntp-filter-${key}`) document.getElementById(id)?.classList.remove('show');
+        });
+
+        const dropdown = document.getElementById(`ntp-filter-${key}`);
+        if(!dropdown) return;
+        if(dropdown.classList.contains('show')) { dropdown.classList.remove('show'); return; }
+
+        // Build unique values based on currently visible dataset (respecting main controls)
+        let filtered = ntpRawData.filter(d => d.ano === currentYear);
+        const uVal = document.getElementById('ntpUnitFilter')?.value || 'Todos';
+        const pVal = document.getElementById('ntpPostoFilter')?.value || 'Todos';
+        if(uVal !== 'Todos') filtered = filtered.filter(d => d.unidade === uVal);
+        if(pVal !== 'Todos') filtered = filtered.filter(d => d.nomePosto === pVal);
+
+        const uniqueValues = [...new Set(filtered.map(r => (r[key]||"") ))].filter(v=>v).sort();
+        let html = `<div onclick="applyNtpFilter('${key}', 'ALL')" class="text-blue-600 font-bold">Limpar Filtro</div>`;
+        if(uniqueValues.length === 0) html += `<div class="empty">(nenhum valor disponível)</div>`;
+        uniqueValues.forEach(v => { html += `<div onclick="applyNtpFilter('${key}', '${(v+"").replace(/'/g, "\\'")}')" class="truncate">${v}</div>`; });
+        dropdown.innerHTML = html;
+        dropdown.classList.add('show');
+        document.addEventListener('click', closeNtpFilters);
+    }
+
+    function closeNtpFilters() {
+        ['ntp-filter-data','ntp-filter-unidade','ntp-filter-status','ntp-filter-id'].forEach(id => document.getElementById(id)?.classList.remove('show'));
+        document.removeEventListener('click', closeNtpFilters);
+    }
+
+    function applyNtpFilter(key, value) {
+        if(value === 'ALL') delete ntpFilterState[key]; else ntpFilterState[key] = value;
+        filterNtpTable();
+    }
+
+    function clearAllNtpFilters() {
+        ntpFilterState = {};
+        document.getElementById('ntpUnitFilter').value = 'Todos';
+        document.getElementById('ntpPostoFilter').value = 'Todos';
+        document.getElementById('ntpSearch').value = '';
+        updateNtpFilters('unit');
+        filterNtpTable();
+    }
+
+</script>
+</body>
+</html>
